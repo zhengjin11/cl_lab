@@ -26,8 +26,9 @@ from inclearn.convnet.utils import extract_features, update_classes_mean, finetu
 # Constants
 EPSILON = 1e-8
 
-loss_part2_weight = 0.5
-aux_loss_part2_weight = 0.5
+loss_part2_weight = 0.01
+aux_loss_part2_weight = 0.1
+
 
 class EnsModel2(IncrementalLearner):
     def __init__(self, cfg, trial_i, _run, ex, tensorboard, inc_dataset):
@@ -183,6 +184,8 @@ class EnsModel2(IncrementalLearner):
 
         for epoch in range(self._n_epochs):
             _loss, _loss_aux = 0.0, 0.0
+            _loss_part1, _loss_part2 = 0.0, 0.0
+
             accu.reset()
             train_new_accu.reset()
             train_old_accu.reset()
@@ -197,7 +200,7 @@ class EnsModel2(IncrementalLearner):
                 self._optimizer.zero_grad()
                 old_classes = targets < (self._n_classes - self._task_size)
                 new_classes = targets >= (self._n_classes - self._task_size)
-                loss_ce, loss_aux = self._forward_loss(
+                loss_ce, loss_part1,  loss_part2, loss_aux = self._forward_loss(
                     inputs,
                     targets,
                     old_classes,
@@ -226,18 +229,26 @@ class EnsModel2(IncrementalLearner):
 
                 _loss += loss_ce
                 _loss_aux += loss_aux
+                _loss_part1 += loss_part1
+                _loss_part2 += loss_part2
+
             _loss = _loss.item()
             _loss_aux = _loss_aux.item()
+            _loss_part1 = _loss_part1.item()
+            _loss_part2 = _loss_part2.item()
+
             if not self._warmup:
                 self._scheduler.step()
             self._ex.logger.info(
-                "Task {}/{}, Epoch {}/{} => Clf loss: {} Aux loss: {}, Train Accu: {}, Train@5 Acc: {}, old acc:{}".
+                "Task {}/{}, Epoch {}/{} => Clf loss: {} Part1: {} Part2: {} Aux loss: {}, Train Accu: {}, Train@5 Acc: {}, old acc:{}".
                 format(
                     self._task + 1,
                     self._n_tasks,
                     epoch + 1,
                     self._n_epochs,
                     round(_loss / i, 3),
+                    round(_loss_part1 / i, 3),
+                    round(_loss_part2 / i, 3),
                     round(_loss_aux / i, 3),
                     round(accu.value()[0], 3),
                     round(accu.value()[1], 3),
@@ -279,7 +290,8 @@ class EnsModel2(IncrementalLearner):
             main_targets[new_classes] -= sum(self._inc_dataset.increments[:self._task])
             loss_part1 = F.cross_entropy(outputs['cur_logit'][new_classes], main_targets[new_classes])
         else:
-            loss_part1 = 0.0
+            # loss_part1 = 0.0
+            loss_part1 = torch.tensor(0.0).to(self._device)
 
         # old class
         if outputs['cur_logit'][old_classes].shape[0] != 0:
@@ -287,7 +299,8 @@ class EnsModel2(IncrementalLearner):
                     outputs['cur_logit'][old_classes].mean(1) - torch.logsumexp(outputs['cur_logit'][old_classes],
                                                                                 dim=1)).mean()
         else:
-            loss_part2 = 0.0
+            # loss_part2 = 0.0
+            loss_part2 = torch.tensor(0.0).to(self._device)
         loss = loss_part1 + loss_part2
 
 
@@ -319,7 +332,7 @@ class EnsModel2(IncrementalLearner):
         else:
             aux_loss = torch.zeros([1]).cuda()
 
-        return loss, aux_loss
+        return loss, loss_part1, loss_part2, aux_loss
 
     def _after_task(self, taski, inc_dataset):
         network = deepcopy(self._parallel_network)
