@@ -26,8 +26,9 @@ from inclearn.convnet.utils import extract_features, update_classes_mean, finetu
 # Constants
 EPSILON = 1e-8
 
-loss_part2_weight = 0.01
-aux_loss_part2_weight = 0.1
+loss_part2_weight = 0.001
+
+# aux_loss_part2_weight = 0.1
 
 
 class EnsModel2(IncrementalLearner):
