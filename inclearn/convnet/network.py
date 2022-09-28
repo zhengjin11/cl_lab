@@ -289,6 +289,7 @@ class BasicNet_ens0(nn.Module):
 
         if self.aux_nplus1:
             aux_fc = self._gen_classifier(self.out_dim, n_classes)
+            # aux_fc = self._gen_fc_classifier(self.out_dim, n_classes)
             # aux_fc = self._gen_classifier(self.out_dim, n_classes + 1)
         else:
             aux_fc = self._gen_classifier(self.out_dim, self.n_classes + n_classes)
@@ -323,6 +324,14 @@ class BasicNet_ens0(nn.Module):
 
         return classifier
 
+    def _gen_fc_classifier(self, in_features, n_classes):
+
+        classifier = nn.Linear(in_features, n_classes, bias=True).to(self.device)
+        if self.init == "kaiming":
+            nn.init.kaiming_normal_(classifier.weight, nonlinearity="linear")
+        nn.init.constant_(classifier.bias, 0.0)
+
+        return classifier
 
 
 class BasicNet_ens1(nn.Module):
