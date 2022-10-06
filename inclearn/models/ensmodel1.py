@@ -16,18 +16,18 @@ from inclearn.tools import factory, utils
 from inclearn.tools.metrics import ClassErrorMeter
 from inclearn.tools.memory import MemorySize
 from inclearn.tools.scheduler import GradualWarmupScheduler
-from inclearn.convnet.utils import extract_features, update_classes_mean, finetune_last_layer
+from inclearn.convnet.utils import extract_features, update_classes_mean, finetune_last_layer, finetune_last_layer_ens1
 
 
 # description
-# every classfier per step
+# every classfier per step and OE AUX CLS
 
 
 # Constants
 EPSILON = 1e-8
 
-aux_loss_weight = 3.0
-aux_loss_part2_weight = 3.0
+aux_loss_weight = 0.5
+aux_loss_part2_weight = 0.5
 
 class EnsModel1(IncrementalLearner):
     def __init__(self, cfg, trial_i, _run, ex, tensorboard, inc_dataset):
@@ -109,7 +109,7 @@ class EnsModel1(IncrementalLearner):
             if self._task >= 1:
                 for i in range(self._task):
                     self._parallel_network.module.convnets[i].eval()
-                    # self._parallel_network.module.classifier[i].eval()
+                    self._parallel_network.module.classifier[i].eval()
         else:
             self._parallel_network.train()
 
@@ -144,8 +144,8 @@ class EnsModel1(IncrementalLearner):
             for i in range(self._task):
                 for p in self._parallel_network.module.convnets[i].parameters():
                     p.requires_grad = False
-                # for p in self._parallel_network.module.classifier[i].parameters():
-                #     p.requires_grad = False
+                for p in self._parallel_network.module.classifier[i].parameters():
+                    p.requires_grad = False
 
         self._optimizer = factory.get_optimizer(filter(lambda p: p.requires_grad, self._network.parameters()),
                                                 self._opt_name, lr, weight_decay)
@@ -326,20 +326,22 @@ class EnsModel1(IncrementalLearner):
                                                        inc_dataset.targets_inc,
                                                        mode="balanced_train")
 
-            # do not finetuing
-            # # finetuning
+            # finetuning
             # self._parallel_network.module.classifier.reset_parameters()
-            # finetune_last_layer(self._ex.logger,
-            #                     self._parallel_network,
-            #                     train_loader,
-            #                     self._n_classes,
-            #                     nepoch=self._decouple["epochs"],
-            #                     lr=self._decouple["lr"],
-            #                     scheduling=self._decouple["scheduling"],
-            #                     lr_decay=self._decouple["lr_decay"],
-            #                     weight_decay=self._decouple["weight_decay"],
-            #                     loss_type="ce",
-            #                     temperature=self._decouple["temperature"])
+            for i in range(len(self._parallel_network.module.classifier)):
+                self._parallel_network.module.classifier[i].reset_parameters()
+
+            finetune_last_layer_ens1(self._ex.logger,
+                                self._parallel_network,
+                                train_loader,
+                                self._n_classes,
+                                nepoch=self._decouple["epochs"],
+                                lr=self._decouple["lr"],
+                                scheduling=self._decouple["scheduling"],
+                                lr_decay=self._decouple["lr_decay"],
+                                weight_decay=self._decouple["weight_decay"],
+                                loss_type="ce",
+                                temperature=self._decouple["temperature"])
 
             network = deepcopy(self._parallel_network)
             if self._cfg["save_ckpt"]:
