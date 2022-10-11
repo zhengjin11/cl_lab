@@ -26,14 +26,15 @@ from inclearn.convnet.utils import extract_features, update_classes_mean, finetu
 # Constants
 EPSILON = 1e-8
 
-aux_loss_weight = 0.5
-aux_loss_part2_weight = 0.5
+margin = -0.8
+aux_loss_weight = 1.0
 
-class EnsModel1(IncrementalLearner):
+
+class EnsModel4(IncrementalLearner):
     def __init__(self, cfg, trial_i, _run, ex, tensorboard, inc_dataset):
 
         super().__init__()
-        print("create ensmodel1 !!!")
+        print("create ensmodel4 !!!")
 
         self._cfg = cfg
         self._device = cfg['device']
@@ -276,35 +277,31 @@ class EnsModel1(IncrementalLearner):
         return self._compute_loss(inputs, targets, outputs, old_classes, new_classes)
 
     def _compute_loss(self, inputs, targets, outputs, old_classes, new_classes):
+
         loss = F.cross_entropy(outputs['raw_logit'], targets)
+        aux_loss = torch.tensor(0.0).to(self._device)
+        aux_loss_part2 = torch.zeros([1]).cuda()
 
-        if outputs['aux_logit'] is not None:
-            aux_targets = targets.clone()
-            # if self._cfg["aux_n+1"]:
-            #     aux_targets[old_classes] = 0
-            #     aux_targets[new_classes] -= sum(self._inc_dataset.increments[:self._task]) - 1
-            #     import pdb
-            #     pdb.set_trace()
-            # aux_loss = F.cross_entropy(outputs['aux_logit'], aux_targets)
+        if (torch.sum(old_classes) != 0):
 
-            if self._cfg["aux_n+1"]:
-                # new class
-                if outputs['aux_logit'][new_classes].shape[0] != 0:
-                    aux_targets[new_classes] -= sum(self._inc_dataset.increments[:self._task])
-                    aux_loss_part1 = F.cross_entropy(outputs['aux_logit'][new_classes], aux_targets[new_classes])
-                else:
-                    aux_loss_part1 = torch.tensor(0.0).to(self._device)
+            need_len = self._network.out_dim
 
-                # old class
-                if outputs['aux_logit'][old_classes].shape[0] != 0:
-                    aux_loss_part2 = aux_loss_part2_weight * -(
-                            outputs['aux_logit'][old_classes].mean(1) - torch.logsumexp(outputs['aux_logit'][old_classes], dim=1)).mean()
-                else:
-                    aux_loss_part2 = torch.tensor(0.0).to(self._device)
-                aux_loss = aux_loss_part1 + aux_loss_part2
-        else:
-            aux_loss = torch.zeros([1]).cuda()
-            aux_loss_part2 = torch.zeros([1]).cuda()
+            old_example_cur_vector = outputs['feature'][old_classes][:, -need_len:]
+            new_example_cur_vector = outputs['feature'][new_classes][:, -need_len:]
+
+            m = new_example_cur_vector.shape[0]
+            n = old_example_cur_vector.shape[0]
+
+            new_example_cur_vector = torch.repeat_interleave(new_example_cur_vector, n, dim=0).to(self._device)
+            old_example_cur_vector = old_example_cur_vector.repeat(m, 1).to(self._device)
+            y = torch.full([m*n], -1).to(self._device)
+
+            # loss_fc = torch.nn.CosineEmbeddingLoss(margin=margin)
+            # aux_loss += loss_fc(new_example_cur_vector, old_example_cur_vector, y)
+
+            cos_similarity = torch.nn.functional.cosine_similarity(new_example_cur_vector, old_example_cur_vector)
+            cos_similarity = cos_similarity.mean()+1 #[-1,1] -> [0,2]
+            aux_loss += cos_similarity
 
         aux_loss = aux_loss_weight * aux_loss
 
@@ -495,3 +492,12 @@ class EnsModel1(IncrementalLearner):
         ypred, ytrue = self._eval_task(data_loader)
         test_acc_stats = utils.compute_accuracy(ypred, ytrue, increments=self._increments, n_classes=self._n_classes)
         self._ex.logger.info(f"test top1acc:{test_acc_stats['top1']}")
+
+
+
+def cosine_distance(vector_a, vector_b):
+
+    similarity = F.linear(F.normalize(vector_a, p=2, dim=0), F.normalize(vector_b, p=2, dim=0))
+    distance = 1-similarity
+
+    return distance
