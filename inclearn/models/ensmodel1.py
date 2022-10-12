@@ -7,6 +7,7 @@ from copy import deepcopy
 from scipy.spatial.distance import cdist
 
 import torch
+import torch.nn as nn
 from torch.nn import DataParallel
 from torch.nn import functional as F
 
@@ -16,7 +17,7 @@ from inclearn.tools import factory, utils
 from inclearn.tools.metrics import ClassErrorMeter
 from inclearn.tools.memory import MemorySize
 from inclearn.tools.scheduler import GradualWarmupScheduler
-from inclearn.convnet.utils import extract_features, update_classes_mean, finetune_last_layer, finetune_last_layer_ens1
+from inclearn.convnet.utils import extract_features, update_classes_mean, finetune_last_layer, finetune_last_layer_ens1, deep_finetune_last_layer_ens1
 
 
 # description
@@ -127,6 +128,42 @@ class EnsModel1(IncrementalLearner):
 
         self._network.add_classes(self._task_size)
         self._network.task_size = self._task_size
+
+        # for param in self._parallel_network.module.convnets[0].named_parameters():
+        #     print(param[0])
+
+        # layer4_param_num = 0
+        # for param in self._parallel_network.module.convnets[0].layer4.named_parameters():
+        #     print(param[0] , param[1].numel())
+        #     layer4_param_num += param[1].numel()
+        # print("layer4_param_num " , layer4_param_num)
+        #
+        # m_num = 0
+        # for m in self._parallel_network.module.convnets[0].layer4.modules():
+        #     if isinstance(m, nn.Conv2d):
+        #         m_num += 1
+        #         print(m_num)
+        #         m.train()
+        #         for param in m.parameters():
+        #             param.requires_grad = True
+        #             print(param.shape)
+        #         torch.nn.init.xavier_normal_(m.weight.data)
+        #         if m.bias is not None:
+        #             torch.nn.init.constant_(m.bias.data, 0.0)
+        #
+        #     if isinstance(m, nn.BatchNorm2d):
+        #         m_num += 1
+        #         print(m_num)
+        #         m.train()
+        #         for param in m.parameters():
+        #             param.requires_grad = True
+        #             print(param.shape)
+        #         m.weight.data.fill_(1.0)
+        #         m.bias.data.fill_(0.0)
+        #
+        # import pdb;
+        # pdb.set_trace()
+
         self.set_optimizer()
 
     def set_optimizer(self, lr=None):
@@ -331,7 +368,7 @@ class EnsModel1(IncrementalLearner):
             for i in range(len(self._parallel_network.module.classifier)):
                 self._parallel_network.module.classifier[i].reset_parameters()
 
-            finetune_last_layer_ens1(self._ex.logger,
+            deep_finetune_last_layer_ens1(self._ex.logger,
                                 self._parallel_network,
                                 train_loader,
                                 self._n_classes,
@@ -342,6 +379,18 @@ class EnsModel1(IncrementalLearner):
                                 weight_decay=self._decouple["weight_decay"],
                                 loss_type="ce",
                                 temperature=self._decouple["temperature"])
+
+            # finetune_last_layer_ens1(self._ex.logger,
+            #                     self._parallel_network,
+            #                     train_loader,
+            #                     self._n_classes,
+            #                     nepoch=self._decouple["epochs"],
+            #                     lr=self._decouple["lr"],
+            #                     scheduling=self._decouple["scheduling"],
+            #                     lr_decay=self._decouple["lr_decay"],
+            #                     weight_decay=self._decouple["weight_decay"],
+            #                     loss_type="ce",
+            #                     temperature=self._decouple["temperature"])
 
             network = deepcopy(self._parallel_network)
             if self._cfg["save_ckpt"]:
