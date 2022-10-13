@@ -54,6 +54,8 @@ def get_model(cfg, trial_i, _run, ex, tensorboard, inc_dataset):
         return models.EnsModel4(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
     if cfg["model"] == "ensmodel5":
         return models.EnsModel5(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
+    if cfg["model"] == "ensmodel6":
+        return models.EnsModel6(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
 
     else:
         raise NotImplementedError(cfg["model"])
