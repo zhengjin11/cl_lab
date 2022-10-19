@@ -409,7 +409,7 @@ class BasicNet_ens1(nn.Module):
 
         # aux_logits = self.aux_classifier(features[:, -self.out_dim:]) if features.shape[1] > self.out_dim else None
 
-        logits = []
+        inner_softmax_vector = []
         raw_logits = []
         features = []
 
@@ -422,14 +422,14 @@ class BasicNet_ens1(nn.Module):
 
             # inner task softmax
             temp_logits = F.softmax(temp_logits, dim=1)
-            logits.append(temp_logits)
+            inner_softmax_vector.append(temp_logits)
 
         features = torch.cat(features, 1)
-        logits = torch.cat(logits, 1)
+        inner_softmax_vector = torch.cat(inner_softmax_vector, 1)
         raw_logits = torch.cat(raw_logits, 1)
 
         aux_logits = self.aux_classifier(features[:, -self.out_dim:]) if features.shape[1] > self.out_dim else None
-        return {'feature': features, 'logit': logits, 'aux_logit': aux_logits, 'raw_logit': raw_logits}
+        return {'feature': features, 'logit': raw_logits, 'aux_logit': aux_logits, 'inner_softmax_vector': inner_softmax_vector}
 
     @property
     def features_dim(self):

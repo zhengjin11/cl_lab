@@ -121,7 +121,7 @@ def finetune_last_layer_ens1(
             inputs, targets = inputs.cuda(), targets.cuda()
             if loss_type == "bce":
                 targets = to_onehot(targets, n_class)
-            outputs = network(inputs)['raw_logit']
+            outputs = network(inputs)['logit']
             _, preds = outputs.max(1)
             optim.zero_grad()
             loss = criterion(outputs / temperature, targets)
@@ -152,6 +152,23 @@ def finetune_last_layer_ens1(
     return network
 
 
+def get_aux_loss(logits, targets, increments):
+    aux_loss = torch.tensor(0.0).to(logits.device)
+
+    count = 0
+    base = 0
+    for i in range(len(increments)):
+        other_task_example_index = (targets<base) | (targets>=(base+increments[i]))
+        if (torch.sum(other_task_example_index) != 0):
+            count+=1
+            other_task_example_logits = logits[other_task_example_index][:, base:base+increments[i]]
+            aux_loss +=  -(other_task_example_logits.mean(1) - torch.logsumexp(other_task_example_logits,dim=1)).mean()
+        base+=increments[i]
+
+    aux_loss = (aux_loss/count)
+
+    return aux_loss
+
 
 def deep_finetune_last_layer_ens1(
     logger,
@@ -165,15 +182,13 @@ def deep_finetune_last_layer_ens1(
     weight_decay=5e-4,
     loss_type="ce",
     temperature=5.0,
+    _increments=None,
+    use_aux = True,
+    aux_loss_weight=0.01,
     test_loader=None,
 ):
-    network.eval()
-    #if hasattr(network.module, "convnets"):
-    #    for net in network.module.convnets:
-    #        net.eval()
-    #else:
-    #    network.module.convnet.eval()
 
+    network.eval()
     param_list = []
 
     for i in range(len(network.module.convnets)):
@@ -213,22 +228,30 @@ def deep_finetune_last_layer_ens1(
 
     logger.info("Begin finetuning last layer")
 
-    for i in range(nepoch):
+    for e in range(nepoch):
         total_loss = 0.0
+        total_aux_loss = 0.0
         total_correct = 0.0
         total_count = 0
         # print(f"dataset loader length {len(loader.dataset)}")
-        for inputs, targets in loader:
+        for i, (inputs, targets) in enumerate(loader, start=1):
             inputs, targets = inputs.cuda(), targets.cuda()
             if loss_type == "bce":
                 targets = to_onehot(targets, n_class)
-            outputs = network(inputs)['raw_logit']
+            outputs = network(inputs)['logit']
             _, preds = outputs.max(1)
             optim.zero_grad()
             loss = criterion(outputs / temperature, targets)
+            aux_loss = get_aux_loss(outputs / temperature, targets, _increments)
+
+            total_loss += loss
+            total_aux_loss += aux_loss
+
+            if use_aux:
+                loss+=aux_loss*aux_loss_weight
             loss.backward()
             optim.step()
-            total_loss += loss * inputs.size(0)
+
             total_correct += (preds == targets).sum()
             total_count += inputs.size(0)
 
@@ -246,10 +269,10 @@ def deep_finetune_last_layer_ens1(
         if test_loader is not None:
             logger.info(
                 "Epoch %d finetuning loss %.3f acc %.3f Eval %.3f" %
-                (i, total_loss.item() / total_count, total_correct.item() / total_count, test_correct / test_count))
+                (e, total_loss.item() / total_count, total_correct.item() / total_count, test_correct / test_count))
         else:
-            logger.info("Epoch %d finetuning loss %.3f acc %.3f" %
-                        (i, total_loss.item() / total_count, total_correct.item() / total_count))
+            logger.info("Epoch %d finetuning ce loss %.3f aux loss %.3f acc %.3f" %
+                        (e, total_loss.item()/i, total_aux_loss.item()/i, total_correct.item() / total_count))
     return network
 
 

@@ -6,7 +6,11 @@ import datetime
 import torch
 
 from inclearn.tools.metrics import ClassErrorMeter
-
+from torchmetrics import Accuracy, ConfusionMatrix
+import matplotlib.pyplot as plt
+import numpy as np
+import itertools
+import os
 
 def get_date():
     return datetime.datetime.now().strftime("%Y%m%d")
@@ -222,3 +226,71 @@ def make_logger(log_name, savedir='.logs/'):
     logger = logging.getLogger()
 
     return logger
+
+def get_confusion_matrix(image_folder, _ypred, _ytrue, _increments):
+
+    ypred = torch.tensor(_ypred)
+    ytrue = torch.tensor(_ytrue)
+    cum_increments = [0] + [sum(_increments[:i + 1]) for i in range(len(_increments))]
+    confusion_matrix = np.zeros((len(_increments), len(_increments)), dtype=np.int32)
+    task_num = len(_increments)
+
+    for i in range(len(cum_increments) - 1):
+        # task i example
+        index = (ytrue >= cum_increments[i]) & (ytrue < cum_increments[i + 1])
+        task_example_pred = ypred[index]
+        pred_class = torch.argmax(task_example_pred, dim=1)
+
+        for j in range(len(cum_increments) - 1):
+            pred_as_task_j_index = (pred_class >= cum_increments[j]) & (pred_class < cum_increments[j + 1])
+            pred_as_task_j_number = torch.sum(pred_as_task_j_index)
+            confusion_matrix[i][j] = pred_as_task_j_number
+
+    diag_sum = np.sum(np.diag(confusion_matrix))
+    matrix_sum = np.sum(confusion_matrix)
+
+    # set configs
+    normalize = False
+    cm = confusion_matrix  # !
+    classes = np.arange(0, len(_increments))
+    title = f'task{task_num-1}, confusion matrix. {diag_sum}/{matrix_sum}, {diag_sum / matrix_sum}'
+    cmap = plt.cm.Blues
+
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        # print("显示百分比：")
+        np.set_printoptions(formatter={'float': '{: 0.2f}'.format})
+        # print(cm)
+    else:
+        # print('显示具体数字：')
+        # print(cm)
+        pass
+
+    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=0)
+    plt.yticks(tick_marks, classes)
+    # matplotlib版本问题，如果不加下面这行代码，则绘制的混淆矩阵上下只能显示一半，有的版本的matplotlib不需要下面的代码，分别试一下即可
+    plt.ylim(len(classes) - 0.5, -0.5)
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, format(cm[i, j], fmt),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+    plt.tight_layout()
+    plt.ylabel('Ground Truth')
+    plt.xlabel('Prediction')
+    # plt.show()
+
+    file_path = os.path.join(image_folder, f"task_{task_num-1}.png")
+    plt.savefig(file_path)
+
+    plt.clf()
+    plt.cla()
+    plt.close()
+
+    return confusion_matrix

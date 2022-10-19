@@ -30,6 +30,10 @@ EPSILON = 1e-8
 aux_loss_weight = 0.5
 aux_loss_part2_weight = 0.5
 
+use_oe_finetune = True
+oe_finetune_loss_weight = 0.5
+
+
 class EnsModel1(IncrementalLearner):
     def __init__(self, cfg, trial_i, _run, ex, tensorboard, inc_dataset):
 
@@ -97,6 +101,11 @@ class EnsModel1(IncrementalLearner):
                 save_path = os.path.join(os.getcwd(), "ckpts/mem")
                 if not os.path.exists(save_path):
                     os.mkdir(save_path)
+
+        if self._cfg["need_conf_matrix"]:
+            images_folder = os.path.join(os.getcwd(), "images")
+            if not os.path.exists(images_folder):
+                os.mkdir(images_folder)
 
     def eval(self):
         self._parallel_network.eval()
@@ -304,7 +313,7 @@ class EnsModel1(IncrementalLearner):
 
         outputs = self._parallel_network(inputs)
         if accu is not None:
-            accu.add(outputs['logit'], targets)
+            accu.add(outputs['inner_softmax_vector'], targets)
             # accu.add(logits.detach(), targets.cpu().numpy())
         # if new_accu is not None:
         #     new_accu.add(logits[new_classes].detach(), targets[new_classes].cpu().numpy())
@@ -313,7 +322,7 @@ class EnsModel1(IncrementalLearner):
         return self._compute_loss(inputs, targets, outputs, old_classes, new_classes)
 
     def _compute_loss(self, inputs, targets, outputs, old_classes, new_classes):
-        loss = F.cross_entropy(outputs['raw_logit'], targets)
+        loss = F.cross_entropy(outputs['logit'], targets)
 
         if outputs['aux_logit'] is not None:
             aux_targets = targets.clone()
@@ -378,7 +387,11 @@ class EnsModel1(IncrementalLearner):
                                 lr_decay=self._decouple["lr_decay"],
                                 weight_decay=self._decouple["weight_decay"],
                                 loss_type="ce",
-                                temperature=self._decouple["temperature"])
+                                temperature=self._decouple["temperature"],
+                                _increments=self._increments,
+                                use_aux=use_oe_finetune,
+                                aux_loss_weight=oe_finetune_loss_weight
+                                )
 
             # finetune_last_layer_ens1(self._ex.logger,
             #                     self._parallel_network,
@@ -435,6 +448,13 @@ class EnsModel1(IncrementalLearner):
         else:
             raise ValueError()
 
+        if self._cfg["need_conf_matrix"] and self._task >= 1:
+            images_folder = os.path.join(os.getcwd(), "images")
+            confusion_matrix = utils.get_confusion_matrix(images_folder, ypred, ytrue, self._increments)
+            diag_sum = np.sum(np.diag(confusion_matrix))
+            matrix_sum = np.sum(confusion_matrix)
+            self._ex.logger.info(f"step {self._task}, {diag_sum}/{matrix_sum}, {diag_sum/matrix_sum}")
+
         return ypred, ytrue
 
     def _compute_accuracy_by_netout(self, data_loader):
@@ -443,7 +463,7 @@ class EnsModel1(IncrementalLearner):
         with torch.no_grad():
             for i, (inputs, lbls) in enumerate(data_loader):
                 inputs = inputs.to(self._device, non_blocking=True)
-                _preds = self._parallel_network(inputs)['logit']
+                _preds = self._parallel_network(inputs)['inner_softmax_vector']
                 if self._cfg["postprocessor"]["enable"] and self._task > 0:
                     _preds = self._network.postprocessor.post_process(_preds, self._task_size)
                 preds.append(_preds.detach().cpu().numpy())
