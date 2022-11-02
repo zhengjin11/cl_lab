@@ -17,7 +17,6 @@ import random
 from easydict import EasyDict as edict
 from tensorboardX import SummaryWriter
 
-# repo_name = 'DER-ClassIL.pytorch'
 repo_name = 'cl_lab'
 base_dir = osp.realpath(".")[:osp.realpath(".").index(repo_name) + len(repo_name)]
 print(f"base_dir {base_dir}")
@@ -97,6 +96,7 @@ def _train(cfg, _run, ex, tensorboard):
 
     top_1_curve = []
     top_5_curve = []
+    rate_curve = []
     results = results_utils.get_template_results(cfg)
     for task_i in range(inc_dataset.n_tasks):
         task_info, train_loader, val_loader, test_loader = inc_dataset.new_task()
@@ -131,6 +131,16 @@ def _train(cfg, _run, ex, tensorboard):
         ypred, ytrue = model.eval_task(test_loader)
         acc_stats = utils.compute_accuracy(ypred, ytrue, increments=model._increments, n_classes=model._n_classes)
 
+        if cfg["need_conf_matrix"] and task_i>=1:
+            images_folder = os.path.join(os.getcwd(), "results", "{}_{}".format(utils.get_date(), cfg["exp"]["name"]))
+            if not os.path.exists(images_folder):
+                os.makedirs(images_folder)
+            confusion_matrix = utils.get_confusion_matrix(images_folder, ypred, ytrue, model._increments)
+            diag_sum = np.sum(np.diag(confusion_matrix))
+            matrix_sum = np.sum(confusion_matrix)
+            ex.logger.info(f"step {task_i}, {diag_sum}/{matrix_sum}, {diag_sum/matrix_sum}")
+            rate_curve.append((diag_sum/matrix_sum)*100)
+
         #Logging
         model._tensorboard.add_scalar(f"taskaccu/trial{trial_i}", acc_stats["top1"]["total"], task_i)
 
@@ -157,9 +167,12 @@ def _train(cfg, _run, ex, tensorboard):
 
     top_1_curve.append(top1_avg_acc)
     top_5_curve.append(top5_avg_acc)
+    if len(rate_curve)!=0:
+        rate_curve.append(sum(rate_curve)/len(rate_curve))
 
     ex.logger.info(f"top_1_curve :{top_1_curve}")
     ex.logger.info(f"top_5_curve :{top_5_curve}")
+    ex.logger.info(f"rate_curve :{rate_curve}")
 
 def do_pretrain(cfg, ex, model, device, train_loader, test_loader):
     if not os.path.exists(osp.join(ex.base_dir, 'pretrain/')):

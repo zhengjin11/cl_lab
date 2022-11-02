@@ -87,11 +87,6 @@ class IncModel(IncrementalLearner):
                 if not os.path.exists(save_path):
                     os.mkdir(save_path)
 
-        if self._cfg["need_conf_matrix"]:
-            images_folder = os.path.join(os.getcwd(), "images")
-            if not os.path.exists(images_folder):
-                os.mkdir(images_folder)
-
     def eval(self):
         self._parallel_network.eval()
 
@@ -341,14 +336,6 @@ class IncModel(IncrementalLearner):
             ypred, ytrue = self._compute_accuracy_by_ncm(data_loader)
         else:
             raise ValueError()
-
-        if self._cfg["need_conf_matrix"] and self._task >= 1:
-            images_folder = os.path.join(os.getcwd(), "images")
-            confusion_matrix = utils.get_confusion_matrix(images_folder, ypred, ytrue, self._increments)
-            diag_sum = np.sum(np.diag(confusion_matrix))
-            matrix_sum = np.sum(confusion_matrix)
-            self._ex.logger.info(f"step {self._task}, {diag_sum}/{matrix_sum}, {diag_sum/matrix_sum}")
-
         return ypred, ytrue
 
     def _compute_accuracy_by_netout(self, data_loader):
