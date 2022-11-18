@@ -302,6 +302,135 @@ def deep_finetune_last_layer_ens1(
 
 
 
+def deep_finetune_last_layer_ens7(
+    logger,
+    network,
+    loader,
+    n_class,
+    nepoch=30,
+    lr=0.1,
+    scheduling=[15, 35],
+    lr_decay=0.1,
+    weight_decay=5e-4,
+    loss_type="ce",
+    temperature=5.0,
+    _increments=None,
+    use_aux = True,
+    aux_loss_weight=0.01,
+    test_loader=None,
+):
+
+    network.eval()
+    param_list = []
+
+    m_num = 0
+    for m in network.module.convnet.layer4.modules():
+        if isinstance(m, nn.Conv2d):
+            m_num += 1
+            m.train()
+            for param in m.parameters():
+                param.requires_grad = True
+                param_list.append(param)
+            torch.nn.init.xavier_normal_(m.weight.data)
+            if m.bias is not None:
+                torch.nn.init.constant_(m.bias.data, 0.0)
+
+        if isinstance(m, nn.BatchNorm2d):
+            m_num += 1
+            m.train()
+            for param in m.parameters():
+                param.requires_grad = True
+                param_list.append(param)
+
+            m.weight.data.fill_(1.0)
+            m.bias.data.fill_(0.0)
+
+    for i in range(len(network.module.final_layer)):
+        m_num = 0
+        for m in network.module.final_layer[i].modules():
+            if isinstance(m, nn.Conv2d):
+                m_num += 1
+                m.train()
+                for param in m.parameters():
+                    param.requires_grad = True
+                    param_list.append(param)
+                torch.nn.init.xavier_normal_(m.weight.data)
+                if m.bias is not None:
+                    torch.nn.init.constant_(m.bias.data, 0.0)
+
+            if isinstance(m, nn.BatchNorm2d):
+                m_num += 1
+                m.train()
+                for param in m.parameters():
+                    param.requires_grad = True
+                    param_list.append(param)
+
+                m.weight.data.fill_(1.0)
+                m.bias.data.fill_(0.0)
+
+    param_list.extend(network.module.classifier.parameters())
+
+    # optim = SGD(network.module.classifier[-1].parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
+    optim = SGD(param_list, lr=lr, momentum=0.9, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optim, scheduling, gamma=lr_decay)
+
+    if loss_type == "ce":
+        criterion = nn.CrossEntropyLoss()
+    else:
+        criterion = nn.BCEWithLogitsLoss()
+
+    logger.info("Begin finetuning last layer")
+
+    for e in range(nepoch):
+        total_loss = 0.0
+        total_aux_loss = 0.0
+        total_correct = 0.0
+        total_count = 0
+        # print(f"dataset loader length {len(loader.dataset)}")
+        for i, (inputs, targets) in enumerate(loader, start=1):
+            inputs, targets = inputs.cuda(), targets.cuda()
+            if loss_type == "bce":
+                targets = to_onehot(targets, n_class)
+            outputs = network(inputs)['logit']
+            _, preds = outputs.max(1)
+            optim.zero_grad()
+            loss = criterion(outputs / temperature, targets)
+            aux_loss = get_aux_loss(outputs / temperature, targets, _increments)
+
+            total_loss += loss
+            total_aux_loss += aux_loss
+
+            if use_aux:
+                loss+=aux_loss*aux_loss_weight
+            loss.backward()
+            optim.step()
+
+            total_correct += (preds == targets).sum()
+            total_count += inputs.size(0)
+
+        if test_loader is not None:
+            test_correct = 0.0
+            test_count = 0.0
+            with torch.no_grad():
+                for inputs, targets in test_loader:
+                    outputs = network(inputs.cuda())['logit']
+                    _, preds = outputs.max(1)
+                    test_correct += (preds.cpu() == targets).sum().item()
+                    test_count += inputs.size(0)
+
+        scheduler.step()
+        if test_loader is not None:
+            logger.info(
+                "Epoch %d finetuning loss %.3f acc %.3f Eval %.3f" %
+                (e, total_loss.item() / total_count, total_correct.item() / total_count, test_correct / test_count))
+        else:
+            logger.info("Epoch %d finetuning ce loss %.3f aux loss %.3f acc %.3f" %
+                        (e, total_loss.item()/i, total_aux_loss.item()/i, total_correct.item() / total_count))
+    return network
+
+
+
+
 
 
 def finetune_last_layer_ens2(

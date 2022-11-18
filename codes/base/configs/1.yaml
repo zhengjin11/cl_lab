@@ -20,6 +20,7 @@ aux_n+1: True
 distillation: "none"
 temperature: 2
 
+need_conf_matrix: False
 reuse_oldfc: False
 weight_normalization: False
 val_per_n_epoch: -1 # Validation Per N epoch. -1 means the function is off.
