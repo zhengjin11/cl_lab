@@ -10,6 +10,7 @@ from .ensmodel4 import EnsModel4
 from .ensmodel5 import EnsModel5
 from .ensmodel6 import EnsModel6
 from .ensmodel7 import EnsModel7
+from .ensmodel8 import EnsModel8
 
 from .sepmodel0 import SepModel0
 
