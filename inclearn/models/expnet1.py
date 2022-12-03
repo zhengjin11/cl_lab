@@ -17,28 +17,26 @@ from inclearn.tools import factory, utils
 from inclearn.tools.metrics import ClassErrorMeter
 from inclearn.tools.memory import MemorySize
 from inclearn.tools.scheduler import GradualWarmupScheduler
-from inclearn.convnet.utils import extract_features, update_classes_mean, finetune_last_layer, finetune_last_layer_ens1, deep_finetune_last_layer_ens1
+from inclearn.convnet.utils import extract_features, update_classes_mean, finetune_last_layer,deep_finetune_last_layer_ens7
 
 
 # description
-# every classfier per step and OE AUX CLS
 
 
 # Constants
 EPSILON = 1e-8
 
-aux_loss_weight = 0.5
 aux_loss_part2_weight = 0.5
 
-use_oe_finetune = True
+use_oe_finetune = False
 oe_finetune_loss_weight = 0.5
 
 
-class EnsModel1(IncrementalLearner):
+class ExpNet1(IncrementalLearner):
     def __init__(self, cfg, trial_i, _run, ex, tensorboard, inc_dataset):
 
         super().__init__()
-        print("create ensmodel1 !!!")
+        print("create expnet1 !!!")
 
         self._cfg = cfg
         self._device = cfg['device']
@@ -70,7 +68,7 @@ class EnsModel1(IncrementalLearner):
 
         # Model
         self._der = cfg['der']  # Whether to expand the representation
-        self._network = network.BasicNet_ens1(
+        self._network = network.BasicNet_exp1(
             cfg["convnet"],
             cfg=cfg,
             nf=cfg["channel"],
@@ -107,14 +105,17 @@ class EnsModel1(IncrementalLearner):
 
     def train(self):
         if self._der:
-            self._parallel_network.train()
-            self._parallel_network.module.convnets[-1].train()
-            self._parallel_network.module.classifier[-1].train()
+            if self._task == 0:
+                self._parallel_network.train()
+            elif self._task >= 1:
+                self._parallel_network.train()
+                self._parallel_network.module.final_layer[-1].train()
 
-            if self._task >= 1:
-                for i in range(self._task):
-                    self._parallel_network.module.convnets[i].eval()
-                    # self._parallel_network.module.classifier[i].eval()
+                self._parallel_network.module.convnet.eval()
+                self._parallel_network.module.convnet.freeze_old_task_bn()
+                self._parallel_network.module.convnet.enable_new_task_bn()
+                for i in range(self._task-1):
+                    self._parallel_network.module.final_layer[i].eval()
         else:
             self._parallel_network.train()
 
@@ -132,42 +133,6 @@ class EnsModel1(IncrementalLearner):
 
         self._network.add_classes(self._task_size)
         self._network.task_size = self._task_size
-
-        # for param in self._parallel_network.module.convnets[0].named_parameters():
-        #     print(param[0])
-
-        # layer4_param_num = 0
-        # for param in self._parallel_network.module.convnets[0].layer4.named_parameters():
-        #     print(param[0] , param[1].numel())
-        #     layer4_param_num += param[1].numel()
-        # print("layer4_param_num " , layer4_param_num)
-        #
-        # m_num = 0
-        # for m in self._parallel_network.module.convnets[0].layer4.modules():
-        #     if isinstance(m, nn.Conv2d):
-        #         m_num += 1
-        #         print(m_num)
-        #         m.train()
-        #         for param in m.parameters():
-        #             param.requires_grad = True
-        #             print(param.shape)
-        #         torch.nn.init.xavier_normal_(m.weight.data)
-        #         if m.bias is not None:
-        #             torch.nn.init.constant_(m.bias.data, 0.0)
-        #
-        #     if isinstance(m, nn.BatchNorm2d):
-        #         m_num += 1
-        #         print(m_num)
-        #         m.train()
-        #         for param in m.parameters():
-        #             param.requires_grad = True
-        #             print(param.shape)
-        #         m.weight.data.fill_(1.0)
-        #         m.bias.data.fill_(0.0)
-        #
-        # import pdb;
-        # pdb.set_trace()
-
         self.set_optimizer()
 
     def set_optimizer(self, lr=None):
@@ -182,11 +147,17 @@ class EnsModel1(IncrementalLearner):
         self._ex.logger.info("Step {} weight decay {:.5f}".format(self._task, weight_decay))
 
         if self._der and self._task > 0:
-            for i in range(self._task):
-                for p in self._parallel_network.module.convnets[i].parameters():
+            for p in self._parallel_network.module.convnet.parameters():
+                p.requires_grad = False
+            self._parallel_network.module.convnet.freeze_old_task_bn()
+            self._parallel_network.module.convnet.enable_new_task_bn()
+
+            for i in range(self._task-1):
+                for p in self._parallel_network.module.final_layer[i].parameters():
                     p.requires_grad = False
-                # for p in self._parallel_network.module.classifier[i].parameters():
-                #     p.requires_grad = False
+
+            for p in self._parallel_network.module.final_layer[-1].parameters():
+                p.requires_grad = True
 
         self._optimizer = factory.get_optimizer(filter(lambda p: p.requires_grad, self._network.parameters()),
                                                 self._opt_name, lr, weight_decay)
@@ -213,9 +184,7 @@ class EnsModel1(IncrementalLearner):
         train_new_accu = ClassErrorMeter(accuracy=True)
         train_old_accu = ClassErrorMeter(accuracy=True)
 
-        # utils.display_weight_norm(self._ex.logger, self._parallel_network, self._increments, "Initial trainset")
-
-        utils.display_weight_norm_ens1(self._ex.logger, self._parallel_network, self._increments, "Initial trainset")
+        utils.display_weight_norm(self._ex.logger, self._parallel_network, self._increments, "Initial trainset")
         utils.display_feature_norm(self._ex.logger, self._parallel_network, train_loader, self._n_classes,
                                    self._increments, "Initial trainset")
 
@@ -224,14 +193,13 @@ class EnsModel1(IncrementalLearner):
 
         for epoch in range(self._n_epochs):
             _loss, _loss_aux = 0.0, 0.0
-            _aux_loss_part2 = 0.0
             accu.reset()
             train_new_accu.reset()
             train_old_accu.reset()
             if self._warmup:
                 self._warmup_scheduler.step()
                 if epoch == self._cfg['warmup_epochs']:
-                    self._network.classifier[self._task].reset_parameters()
+                    self._network.classifier.reset_parameters()
                     if self._cfg['use_aux_cls']:
                         self._network.aux_classifier.reset_parameters()
             for i, (inputs, targets) in enumerate(train_loader, start=1):
@@ -239,7 +207,7 @@ class EnsModel1(IncrementalLearner):
                 self._optimizer.zero_grad()
                 old_classes = targets < (self._n_classes - self._task_size)
                 new_classes = targets >= (self._n_classes - self._task_size)
-                loss_ce, loss_aux, aux_loss_part2 = self._forward_loss(
+                loss_ce, loss_aux = self._forward_loss(
                     inputs,
                     targets,
                     old_classes,
@@ -268,15 +236,12 @@ class EnsModel1(IncrementalLearner):
 
                 _loss += loss_ce
                 _loss_aux += loss_aux
-                _aux_loss_part2 += aux_loss_part2
-
             _loss = _loss.item()
             _loss_aux = _loss_aux.item()
-            _aux_loss_part2 = _aux_loss_part2.item()
             if not self._warmup:
                 self._scheduler.step()
             self._ex.logger.info(
-                "Task {}/{}, Epoch {}/{} => Clf loss: {} Aux loss: {}, Aux loss part2: {}, Train Accu: {}, Train@5 Acc: {}, old acc:{}".
+                "Task {}/{}, Epoch {}/{} => Clf loss: {} Aux loss: {}, Train Accu: {}, Train@5 Acc: {}, old acc:{}".
                 format(
                     self._task + 1,
                     self._n_tasks,
@@ -284,7 +249,6 @@ class EnsModel1(IncrementalLearner):
                     self._n_epochs,
                     round(_loss / i, 3),
                     round(_loss_aux / i, 3),
-                    round(_aux_loss_part2 / i, 3),
                     round(accu.value()[0], 3),
                     round(accu.value()[1], 3),
                     round(train_old_accu.value()[0], 3),
@@ -296,9 +260,7 @@ class EnsModel1(IncrementalLearner):
         # For the large-scale dataset, we manage the data in the shared memory.
         self._inc_dataset.shared_data_inc = train_loader.dataset.share_memory
 
-        # utils.display_weight_norm(self._ex.logger, self._parallel_network, self._increments, "After training")
-
-        utils.display_weight_norm_ens1(self._ex.logger, self._parallel_network, self._increments, "After training")
+        utils.display_weight_norm(self._ex.logger, self._parallel_network, self._increments, "After training")
         utils.display_feature_norm(self._ex.logger, self._parallel_network, train_loader, self._n_classes,
                                    self._increments, "Trainset")
         self._run.info[f"trial{self._trial_i}"][f"task{self._task}_train_accu"] = round(accu.value()[0], 3)
@@ -308,7 +270,7 @@ class EnsModel1(IncrementalLearner):
 
         outputs = self._parallel_network(inputs)
         if accu is not None:
-            accu.add(outputs['inner_softmax_vector'], targets)
+            accu.add(outputs['logit'], targets)
             # accu.add(logits.detach(), targets.cpu().numpy())
         # if new_accu is not None:
         #     new_accu.add(logits[new_classes].detach(), targets[new_classes].cpu().numpy())
@@ -334,22 +296,19 @@ class EnsModel1(IncrementalLearner):
                     aux_targets[new_classes] -= sum(self._inc_dataset.increments[:self._task])
                     aux_loss_part1 = F.cross_entropy(outputs['aux_logit'][new_classes], aux_targets[new_classes])
                 else:
-                    aux_loss_part1 = torch.tensor(0.0).to(self._device)
+                    aux_loss_part1 = 0.0
 
                 # old class
                 if outputs['aux_logit'][old_classes].shape[0] != 0:
                     aux_loss_part2 = aux_loss_part2_weight * -(
                             outputs['aux_logit'][old_classes].mean(1) - torch.logsumexp(outputs['aux_logit'][old_classes], dim=1)).mean()
                 else:
-                    aux_loss_part2 = torch.tensor(0.0).to(self._device)
+                    aux_loss_part2 = 0.0
                 aux_loss = aux_loss_part1 + aux_loss_part2
         else:
             aux_loss = torch.zeros([1]).cuda()
-            aux_loss_part2 = torch.zeros([1]).cuda()
 
-        aux_loss = aux_loss_weight * aux_loss
-
-        return loss, aux_loss, aux_loss_part2
+        return loss, aux_loss
 
     def _after_task(self, taski, inc_dataset):
         network = deepcopy(self._parallel_network)
@@ -368,11 +327,8 @@ class EnsModel1(IncrementalLearner):
                                                        mode="balanced_train")
 
             # finetuning
-            # self._parallel_network.module.classifier.reset_parameters()
-            for i in range(len(self._parallel_network.module.classifier)):
-                self._parallel_network.module.classifier[i].reset_parameters()
-
-            deep_finetune_last_layer_ens1(self._ex.logger,
+            self._parallel_network.module.classifier.reset_parameters()
+            finetune_last_layer(self._ex.logger,
                                 self._parallel_network,
                                 train_loader,
                                 self._n_classes,
@@ -382,13 +338,9 @@ class EnsModel1(IncrementalLearner):
                                 lr_decay=self._decouple["lr_decay"],
                                 weight_decay=self._decouple["weight_decay"],
                                 loss_type="ce",
-                                temperature=self._decouple["temperature"],
-                                _increments=self._increments,
-                                use_aux=use_oe_finetune,
-                                aux_loss_weight=oe_finetune_loss_weight
-                                )
+                                temperature=self._decouple["temperature"])
 
-            # finetune_last_layer_ens1(self._ex.logger,
+            # deep_finetune_last_layer_ens7(self._ex.logger,
             #                     self._parallel_network,
             #                     train_loader,
             #                     self._n_classes,
@@ -398,7 +350,11 @@ class EnsModel1(IncrementalLearner):
             #                     lr_decay=self._decouple["lr_decay"],
             #                     weight_decay=self._decouple["weight_decay"],
             #                     loss_type="ce",
-            #                     temperature=self._decouple["temperature"])
+            #                     temperature=self._decouple["temperature"],
+            #                     _increments=self._increments,
+            #                     use_aux=use_oe_finetune,
+            #                     aux_loss_weight=oe_finetune_loss_weight
+            #                     )
 
             network = deepcopy(self._parallel_network)
             if self._cfg["save_ckpt"]:
@@ -442,12 +398,6 @@ class EnsModel1(IncrementalLearner):
             ypred, ytrue = self._compute_accuracy_by_ncm(data_loader)
         else:
             raise ValueError()
-        # if self._cfg["need_conf_matrix"] and self._task >= 1:
-        #     images_folder = os.path.join(os.getcwd(), "result", "{}_{}".format(utils.get_date(), self._cfg["exp"]["name"]))
-        #     confusion_matrix = utils.get_confusion_matrix(images_folder, ypred, ytrue, self._increments)
-        #     diag_sum = np.sum(np.diag(confusion_matrix))
-        #     matrix_sum = np.sum(confusion_matrix)
-        #     self._ex.logger.info(f"step {self._task}, {diag_sum}/{matrix_sum}, {diag_sum/matrix_sum}")
 
         return ypred, ytrue
 
@@ -457,11 +407,10 @@ class EnsModel1(IncrementalLearner):
         with torch.no_grad():
             for i, (inputs, lbls) in enumerate(data_loader):
                 inputs = inputs.to(self._device, non_blocking=True)
-                _preds = self._parallel_network(inputs)['inner_softmax_vector']
-                base = 0
-                for inc_size in self._increments:
-                    _preds[:, base:base+inc_size] = _preds[:, base:base+inc_size]*inc_size
-                    base += inc_size
+                _preds = self._parallel_network(inputs)['mix_p_vec']
+                if _preds is None:
+                    _preds = self._parallel_network(inputs)['logit']
+                # _preds = self._parallel_network(inputs)['logit']
                 if self._cfg["postprocessor"]["enable"] and self._task > 0:
                     _preds = self._network.postprocessor.post_process(_preds, self._task_size)
                 preds.append(_preds.detach().cpu().numpy())

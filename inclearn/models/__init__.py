@@ -14,4 +14,9 @@ from .ensmodel8 import EnsModel8
 
 from .sepmodel0 import SepModel0
 
+from .expnet1 import ExpNet1
+from .expnet2 import ExpNet2
+from .expnet3 import ExpNet3
+
+
 # from .bic import BiC

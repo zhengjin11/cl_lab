@@ -3,7 +3,7 @@ from torch import nn
 from torch import optim
 
 from inclearn import models
-from inclearn.convnet import resnet, cifar_resnet, modified_resnet_cifar, preact_resnet
+from inclearn.convnet import resnet, cifar_resnet, modified_resnet_cifar, preact_resnet, ours_resnet
 from inclearn.datasets import data
 
 
@@ -25,6 +25,12 @@ def get_convnet(convnet_type, **kwargs):
         return modified_resnet_cifar.resnet32(**kwargs)
     elif convnet_type == "preact_resnet18":
         return preact_resnet.PreActResNet18(**kwargs)
+    elif convnet_type == "resnet18_exp1":
+        return ours_resnet.resnet18_exp1(**kwargs)
+    elif convnet_type == "resnet18_exp2":
+        return ours_resnet.resnet18_exp2(**kwargs)
+    elif convnet_type == "resnet18_exp3":
+        return ours_resnet.resnet18_exp3(**kwargs)
     else:
         raise NotImplementedError("Unknwon convnet type {}.".format(convnet_type))
 
@@ -60,7 +66,12 @@ def get_model(cfg, trial_i, _run, ex, tensorboard, inc_dataset):
         return models.EnsModel7(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
     if cfg["model"] == "ensmodel8":
         return models.EnsModel8(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
-
+    if cfg["model"] == "expnet1":
+        return models.ExpNet1(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
+    if cfg["model"] == "expnet2":
+        return models.ExpNet2(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
+    if cfg["model"] == "expnet3":
+        return models.ExpNet3(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
     else:
         raise NotImplementedError(cfg["model"])
 

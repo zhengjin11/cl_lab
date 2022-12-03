@@ -214,29 +214,28 @@ def deep_finetune_last_layer_ens1(
                 m.weight.data.fill_(1.0)
                 m.bias.data.fill_(0.0)
 
-
-    for i in range(len(network.module.convnets)):
-        m_num = 0
-        for m in network.module.convnets[i].layer3.modules():
-            if isinstance(m, nn.Conv2d):
-                m_num += 1
-                m.train()
-                for param in m.parameters():
-                    param.requires_grad = True
-                    param_list.append(param)
-                torch.nn.init.xavier_normal_(m.weight.data)
-                if m.bias is not None:
-                    torch.nn.init.constant_(m.bias.data, 0.0)
-
-            if isinstance(m, nn.BatchNorm2d):
-                m_num += 1
-                m.train()
-                for param in m.parameters():
-                    param.requires_grad = True
-                    param_list.append(param)
-
-                m.weight.data.fill_(1.0)
-                m.bias.data.fill_(0.0)
+    # for i in range(len(network.module.convnets)):
+    #     m_num = 0
+    #     for m in network.module.convnets[i].layer3.modules():
+    #         if isinstance(m, nn.Conv2d):
+    #             m_num += 1
+    #             m.train()
+    #             for param in m.parameters():
+    #                 param.requires_grad = True
+    #                 param_list.append(param)
+    #             torch.nn.init.xavier_normal_(m.weight.data)
+    #             if m.bias is not None:
+    #                 torch.nn.init.constant_(m.bias.data, 0.0)
+    #
+    #         if isinstance(m, nn.BatchNorm2d):
+    #             m_num += 1
+    #             m.train()
+    #             for param in m.parameters():
+    #                 param.requires_grad = True
+    #                 param_list.append(param)
+    #
+    #             m.weight.data.fill_(1.0)
+    #             m.bias.data.fill_(0.0)
 
 
     for i in range(len(network.module.classifier)):
