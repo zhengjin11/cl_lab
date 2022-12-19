@@ -344,9 +344,9 @@ def deep_finetune_last_layer_ens7(
             m.weight.data.fill_(1.0)
             m.bias.data.fill_(0.0)
 
-    for i in range(len(network.module.final_layer)):
+    for i in range(len(network.module.exp_layer)):
         m_num = 0
-        for m in network.module.final_layer[i].modules():
+        for m in network.module.exp_layer[i].modules():
             if isinstance(m, nn.Conv2d):
                 m_num += 1
                 m.train()

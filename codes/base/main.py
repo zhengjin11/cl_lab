@@ -139,6 +139,7 @@ def _train(cfg, _run, ex, tensorboard):
             diag_sum = np.sum(np.diag(confusion_matrix))
             matrix_sum = np.sum(confusion_matrix)
             ex.logger.info(f"step {task_i}, {diag_sum}/{matrix_sum}, {diag_sum/matrix_sum}")
+            ex.logger.info(f"step {task_i}, confusion_matrix \n {confusion_matrix}")
             rate_curve.append((diag_sum/matrix_sum)*100)
 
         #Logging

@@ -31,6 +31,23 @@ def train(cfg, model, optimizer, device, train_loader):
     accu.reset()
 
     model.train()
+
+    # # find lr ================================================================================
+    # import math
+    # beta = 0.98
+    # num = len(train_loader) - 1
+    # init_value = 1e-4
+    # final_value = 100
+    # mult = (final_value / init_value) ** (1 / num)
+    # lr = init_value
+    # optimizer.param_groups[0]['lr'] = lr
+    # avg_loss = 0.
+    # best_loss = 0.
+    # batch_num = 0
+    # losses = []
+    # log_lrs = []
+    # # find lr ================================================================================
+
     for i, (inputs, targets) in enumerate(train_loader, start=1):
         # assert torch.isnan(inputs).sum().item() == 0
         optimizer.zero_grad()
@@ -48,6 +65,33 @@ def train(cfg, model, optimizer, device, train_loader):
         loss.backward()
         optimizer.step()
         _loss += loss
+
+        # # find lr ================================================================================
+        # # Compute the smoothed loss
+        # batch_num += 1
+        # print(f"batch {batch_num}")
+        # avg_loss = beta * avg_loss + (1 - beta) * loss.item()
+        # smoothed_loss = avg_loss / (1 - beta ** batch_num)
+        # # Stop if the loss is exploding
+        # if batch_num > 1 and smoothed_loss > 1000 * best_loss:
+        #     break
+        # # Record the best loss
+        # if smoothed_loss < best_loss or batch_num == 1:
+        #     best_loss = smoothed_loss
+        # losses.append(smoothed_loss)
+        # log_lrs.append(math.log10(lr))
+        # # Update the lr for the next step
+        # lr *= mult
+        # optimizer.param_groups[0]['lr'] = lr
+        # # find lr ================================================================================
+
+    # # find lr ================================================================================
+    # # finish
+    # print("Y : ", losses)
+    # print("X : ", log_lrs)
+    # import pdb
+    # pdb.set_trace()
+    # # find lr ================================================================================
 
     return (
         round(_loss.item() / i, 3),

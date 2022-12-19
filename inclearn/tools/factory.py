@@ -31,6 +31,10 @@ def get_convnet(convnet_type, **kwargs):
         return ours_resnet.resnet18_exp2(**kwargs)
     elif convnet_type == "resnet18_exp3":
         return ours_resnet.resnet18_exp3(**kwargs)
+    elif convnet_type == "resnet18_exp4":
+        return ours_resnet.resnet18_exp4(**kwargs)
+    elif convnet_type == "resnet18_exp5":
+        return ours_resnet.resnet18_exp5(**kwargs)
     else:
         raise NotImplementedError("Unknwon convnet type {}.".format(convnet_type))
 
@@ -72,6 +76,14 @@ def get_model(cfg, trial_i, _run, ex, tensorboard, inc_dataset):
         return models.ExpNet2(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
     if cfg["model"] == "expnet3":
         return models.ExpNet3(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
+    if cfg["model"] == "expnet1_mulcls":
+        return models.ExpNet1_mulcls(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
+    if cfg["model"] == "expnet4":
+        return models.ExpNet4(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
+    if cfg["model"] == "expnet5":
+        return models.ExpNet5(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
+    if cfg["model"] == "expnet4_mulcls":
+        return models.ExpNet4_mulcls(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
     else:
         raise NotImplementedError(cfg["model"])
 
