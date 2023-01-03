@@ -4,6 +4,7 @@
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 from torch.nn import functional as F
+import copy
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']
 
@@ -34,11 +35,25 @@ class MultiBN(nn.Module):
         self.BN_list = nn.ModuleList()
         self.BN_list.append(nn.BatchNorm2d(inplanes))
 
-    def add_bn(self):
-        new_bn = nn.BatchNorm2d(self.inplanes)
-        nn.init.constant_(new_bn.weight, 1)
-        nn.init.constant_(new_bn.bias, 0)
-        new_bn.train()
+    def add_bn(self, init_type=1):
+
+        if init_type == 1:
+            # Case1 random init
+            new_bn = nn.BatchNorm2d(self.inplanes)
+            nn.init.constant_(new_bn.weight, 1)
+            nn.init.constant_(new_bn.bias, 0)
+            new_bn.train()
+        elif init_type == 2:
+            # Case2 init with task0 param
+            new_bn = copy.deepcopy(self.BN_list[0])
+            new_bn.train()
+        elif init_type == 3:
+            # Case3 init with last task param
+            new_bn = copy.deepcopy(self.BN_list[-1])
+            new_bn.train()
+        else:
+            raise Exception('init type error')
+
         self.BN_list.append(new_bn)
 
     def get_bn_num(self):
@@ -534,10 +549,13 @@ class ResNet_exp4(nn.Module):
                  zero_init_residual=True,
                  dataset='cifar',
                  start_class=0,
-                 remove_last_relu=False):
+                 remove_last_relu=False,
+                 init_type=1
+                 ):
         super(ResNet_exp4, self).__init__()
         self.remove_last_relu = remove_last_relu
         self.inplanes = nf
+        self.init_type = init_type
         if 'cifar' in dataset:
             self.conv1 = nn.Sequential(nn.Conv2d(3, nf, kernel_size=3, stride=1, padding=1, bias=False),
                                        nn.BatchNorm2d(nf), nn.ReLU(inplace=True))
@@ -588,6 +606,13 @@ class ResNet_exp4(nn.Module):
                     nn.init.constant_(m.bn3.weight, 0)
                 elif isinstance(m, BasicBlock):
                     nn.init.constant_(m.bn2.weight, 0)
+        # more init
+        # if zero_init_residual:
+        #     for m in self.modules():
+        #         if isinstance(m, Bottleneck):
+        #             nn.init.constant_(m.bn3.weight, 0)
+        #         elif isinstance(m, BasicBlock_expandable):
+        #             nn.init.constant_(m.bn2.BN_list[0].weight, 0)
 
     def _make_layer(self, block, planes, blocks, remove_last_relu=False, stride=1):
         downsample = None
@@ -639,7 +664,7 @@ class ResNet_exp4(nn.Module):
     def add_new_task_bn(self):
         for m in self.modules():
             if isinstance(m, MultiBN):
-                m.add_bn()
+                m.add_bn(self.init_type)
 
     def enable_new_task_bn(self):
         for m in self.modules():
@@ -676,10 +701,12 @@ class ResNet_exp5(nn.Module):
                  zero_init_residual=True,
                  dataset='cifar',
                  start_class=0,
-                 remove_last_relu=False):
+                 remove_last_relu=False,
+                 init_type=1):
         super(ResNet_exp5, self).__init__()
         self.remove_last_relu = remove_last_relu
         self.inplanes = nf
+        self.init_type = init_type
         if 'cifar' in dataset:
             self.conv1 = nn.Sequential(nn.Conv2d(3, nf, kernel_size=3, stride=1, padding=1, bias=False),
                                        nn.BatchNorm2d(nf), nn.ReLU(inplace=True))
@@ -781,7 +808,7 @@ class ResNet_exp5(nn.Module):
     def add_new_task_bn(self):
         for m in self.modules():
             if isinstance(m, MultiBN):
-                m.add_bn()
+                m.add_bn(self.init_type)
 
     def enable_new_task_bn(self):
         for m in self.modules():
@@ -807,6 +834,8 @@ class ResNet_exp5(nn.Module):
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         return x
+
+
 
 
 

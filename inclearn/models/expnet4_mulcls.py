@@ -342,10 +342,10 @@ class ExpNet4_mulcls(IncrementalLearner):
     def _after_task(self, taski, inc_dataset):
         network = deepcopy(self._parallel_network)
         network.eval()
-        self._ex.logger.info("save model")
-        if self._cfg["save_ckpt"] and taski >= self._cfg["start_task"]:
-            save_path = os.path.join(os.getcwd(), "ckpts")
-            torch.save(network.cpu().state_dict(), "{}/step{}.ckpt".format(save_path, self._task))
+        # self._ex.logger.info("save model")
+        # if self._cfg["save_ckpt"] and taski >= self._cfg["start_task"]:
+        #     save_path = os.path.join(os.getcwd(), "ckpts")
+        #     torch.save(network.cpu().state_dict(), "{}/step{}.ckpt".format(save_path, self._task))
 
         if (self._cfg["decouple"]['enable'] and taski > 0):
             if self._cfg["decouple"]["fullset"]:
@@ -414,6 +414,12 @@ class ExpNet4_mulcls(IncrementalLearner):
                     torch.save(memory, "{}/mem_step{}.ckpt".format(save_path, self._task))
                     self._ex.logger.info(f"Save step{self._task} memory!")
 
+        network.eval()
+        self._ex.logger.info("save model")
+        if self._cfg["save_ckpt"] and taski >= self._cfg["start_task"]:
+            save_path = os.path.join(os.getcwd(), "ckpts")
+            torch.save(network.cpu().state_dict(), "{}/step{}.ckpt".format(save_path, self._task))
+
         self._parallel_network.eval()
         self._old_model = deepcopy(self._parallel_network)
         self._old_model.module.freeze()
@@ -438,18 +444,38 @@ class ExpNet4_mulcls(IncrementalLearner):
             for i, (inputs, lbls) in enumerate(data_loader):
                 inputs = inputs.to(self._device, non_blocking=True)
                 ret_dict = self._parallel_network(inputs)
-                _preds = ret_dict['mix_p_vec']
                 _old_cls_logits = ret_dict['old_cls_logit']
                 _aux_logits = ret_dict['aux_logit']
+                old_class_num = sum(self._increments) - self._increments[-1]
+                new_class_num = self._increments[-1]
 
-                if _preds is None:
-                    _preds = self._parallel_network(inputs)['logit']
-                else:
-                    _preds[:, -self._increments[-1]:] = _preds[:, -self._increments[-1]:] * -self._increments[-1]
-                    old_class_num = sum(self._increments) - self._increments[-1]
-                    _preds[:, :old_class_num] = _preds[:, :old_class_num] * old_class_num
-                    pass
-                # _preds = self._parallel_network(inputs)['logit']
+                # case1 1 big cls
+                # _preds = ret_dict['logit']
+
+                # case2 2 cls
+                # _preds = ret_dict['mix_p_vec']
+                # if _preds is None:
+                #     _preds = self._parallel_network(inputs)['logit']
+                # else:
+                #     _preds[:, -self._increments[-1]:] = _preds[:, -self._increments[-1]:] * self._increments[-1]
+                #     old_class_num = sum(self._increments) - self._increments[-1]
+                #     _preds[:, :old_class_num] = _preds[:, :old_class_num] * old_class_num
+                #     pass
+
+                # case3 3 cls
+                _preds = ret_dict['logit']
+                if self._task > 0:
+                    weight_of_new_preds = 1.0
+                    _preds = F.softmax(_preds, dim=1)
+                    old_expert_preds = F.softmax(_old_cls_logits, dim=1)
+                    new_expert_preds = F.softmax(_aux_logits, dim=1)
+
+                    _preds = _preds*(old_class_num+new_class_num)
+                    _preds[:, :old_class_num] += old_expert_preds*old_class_num
+                    _preds[:, -new_class_num:] += (weight_of_new_preds)*new_expert_preds*new_class_num
+                    # _preds = _preds
+                    # _preds[:, :old_class_num] += old_expert_preds
+                    # _preds[:, -new_class_num:] += (weight_of_new_preds) * new_expert_preds
 
                 if self._cfg["postprocessor"]["enable"] and self._task > 0:
                     _preds = self._network.postprocessor.post_process(_preds, self._task_size)

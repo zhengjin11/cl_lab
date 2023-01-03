@@ -80,7 +80,7 @@ pretrain:
     - 160
   lr_decay: 0.1
   weight_decay: 0.0005
-
+  load_pretrain: False
 
 # Dataset Cfg
 dataset: "cifar100" #'imagenet100', 'cifar100'

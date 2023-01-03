@@ -195,7 +195,7 @@ def do_pretrain(cfg, ex, model, device, train_loader, test_loader):
             cfg["pretrain"]["epochs"],
         ),
     )
-    if osp.exists(model_path):
+    if osp.exists(model_path) and cfg['pretrain']['load_pretrain']:
         print("Load pretrain model")
         if hasattr(model._network, "module"):
             model._network.module.load_state_dict(torch.load(model_path))
@@ -217,6 +217,8 @@ def test(_run, _rnd, _seed):
     model = factory.get_model(cfg, trial_i, _run, ex, tensorboard, inc_dataset)
     model._network.task_size = cfg.increment
 
+    top_1_curve = []
+    top_5_curve = []
     test_results = results_utils.get_template_results(cfg)
     for taski in range(inc_dataset.n_tasks):
         task_info, train_loader, _, test_loader = inc_dataset.new_task()
@@ -237,13 +239,32 @@ def test(_run, _rnd, _seed):
         model.after_task(taski, inc_dataset)
 
         ypred, ytrue = model.eval_task(test_loader)
+        if cfg["need_conf_matrix"] and taski>=1:
+            images_folder = os.path.join(os.getcwd(), "results", "{}_{}".format(utils.get_date(), cfg["exp"]["name"]))
+            if not os.path.exists(images_folder):
+                os.makedirs(images_folder)
+            confusion_matrix = utils.get_confusion_matrix(images_folder, ypred, ytrue, model._increments)
+            diag_sum = np.sum(np.diag(confusion_matrix))
+            matrix_sum = np.sum(confusion_matrix)
+            ex.logger.info(f"step {taski}, {diag_sum}/{matrix_sum}, {diag_sum/matrix_sum}")
+            ex.logger.info(f"step {taski}, confusion_matrix \n {confusion_matrix}")
 
         test_acc_stats = utils.compute_accuracy(ypred, ytrue, increments=model._increments, n_classes=model._n_classes)
         test_results['results'].append(test_acc_stats)
         ex.logger.info(f"task{taski} test top1acc:{test_acc_stats['top1']}")
 
+        top_1_curve.append(test_acc_stats['top1']['total'])
+        top_5_curve.append(test_acc_stats['top5']['total'])
+
     avg_test_acc = results_utils.compute_avg_inc_acc(test_results['results'])
     ex.logger.info(f"Test Average Incremental Accuracy: {avg_test_acc}")
+
+    top1_avg_acc, top5_avg_acc = avg_test_acc
+    top_1_curve.append(top1_avg_acc)
+    top_5_curve.append(top5_avg_acc)
+
+    ex.logger.info(f"top_1_curve :{top_1_curve}")
+    ex.logger.info(f"top_5_curve :{top_5_curve}")
 
 if __name__ == "__main__":
     # ex.add_config('./codes/base/configs/default.yaml')

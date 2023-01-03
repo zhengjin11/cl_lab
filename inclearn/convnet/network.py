@@ -1122,6 +1122,7 @@ class BasicNet_ens7(nn.Module):
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
+                                               start_class=self.start_class,
                                                remove_last_relu=self.remove_last_relu)
             self.final_layer = nn.ModuleList()
             self.out_dim = self.convnet.out_dim
@@ -1362,6 +1363,7 @@ class BasicNet_ens8(nn.Module):
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
+                                               start_class=self.start_class,
                                                remove_last_relu=self.remove_last_relu)
             self.final_layer = nn.ModuleList()
             self.out_dim = self.convnet.out_dim
@@ -1618,6 +1620,7 @@ class BasicNet_exp1(nn.Module):
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
+                                               start_class=self.start_class,
                                                remove_last_relu=self.remove_last_relu)
             self.final_layer = nn.ModuleList()
             self.out_dim = self.convnet.out_dim
@@ -1838,6 +1841,7 @@ class BasicNet_exp2(nn.Module):
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
+                                               start_class=self.start_class,
                                                remove_last_relu=self.remove_last_relu)
             self.final_layer = nn.ModuleList()
             self.out_dim = self.convnet.out_dim
@@ -2058,6 +2062,7 @@ class BasicNet_exp3(nn.Module):
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
+                                               start_class=self.start_class,
                                                remove_last_relu=self.remove_last_relu)
             self.final_layer = nn.ModuleList()
             self.out_dim = self.convnet.out_dim
@@ -2252,19 +2257,24 @@ class BasicNet_exp4(nn.Module):
         self.der = cfg['der']
         self.aux_nplus1 = cfg['aux_n+1']
         self.reuse_oldfc = cfg['reuse_oldfc']
+        self.init_type = cfg['init_type']
 
         if self.der:
             print("Enable dynamical reprensetation expansion!")
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
-                                               remove_last_relu=self.remove_last_relu)
+                                               start_class=self.start_class,
+                                               remove_last_relu=self.remove_last_relu,
+                                               init_type = self.init_type
+                                               )
             self.exp_layer = nn.ModuleList()
             self.out_dim = self.convnet.out_dim
         else:
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
+                                               start_class=self.start_class,
                                                remove_last_relu=self.remove_last_relu)
             self.out_dim = self.convnet.out_dim
         self.classifier = None
@@ -2363,29 +2373,60 @@ class BasicNet_exp4(nn.Module):
 
     def _add_classes_multi_fc(self, n_classes):
         if self.ntask > 1:
-            new_exp_layer_ = []
-            new_conv1 = copy.deepcopy(self.convnet.conv1)
-            new_exp_layer_.append(new_conv1)
-            new_layer1 = copy.deepcopy(self.convnet.layer1)
-            new_exp_layer_.append(new_layer1)
-            new_layer2 = copy.deepcopy(self.convnet.layer2)
-            new_exp_layer_.append(new_layer2)
-            new_layer3 = copy.deepcopy(self.convnet.layer3)
-            new_exp_layer_.append(new_layer3)
+            if self.init_type == 1:
+                # Case1 random init
+                new_exp_layer_ = []
+                new_conv1 = copy.deepcopy(self.convnet.conv1)
+                new_exp_layer_.append(new_conv1)
+                new_layer1 = copy.deepcopy(self.convnet.layer1)
+                new_exp_layer_.append(new_layer1)
+                new_layer2 = copy.deepcopy(self.convnet.layer2)
+                new_exp_layer_.append(new_layer2)
+                new_layer3 = copy.deepcopy(self.convnet.layer3)
+                new_exp_layer_.append(new_layer3)
+                new_final_layer = nn.Sequential(*new_exp_layer_)
 
-            new_final_layer = nn.Sequential(*new_exp_layer_)
-
-            m_num = 0
-            for m in new_final_layer.modules():
-                if isinstance(m, nn.Conv2d):
-                    m_num += 1
-                    torch.nn.init.xavier_normal_(m.weight.data)
-                    if m.bias is not None:
-                        torch.nn.init.constant_(m.bias.data, 0.0)
-                if isinstance(m, nn.BatchNorm2d):
-                    m_num += 1
-                    m.weight.data.fill_(1.0)
-                    m.bias.data.fill_(0.0)
+                m_num = 0
+                for m in new_final_layer.modules():
+                    if isinstance(m, nn.Conv2d):
+                        m_num += 1
+                        torch.nn.init.xavier_normal_(m.weight.data)
+                        if m.bias is not None:
+                            torch.nn.init.constant_(m.bias.data, 0.0)
+                    if isinstance(m, nn.BatchNorm2d):
+                        m_num += 1
+                        m.weight.data.fill_(1.0)
+                        m.bias.data.fill_(0.0)
+            elif self.init_type == 2:
+                # Case2 init with task0 param
+                new_exp_layer_ = []
+                new_conv1 = copy.deepcopy(self.convnet.conv1)
+                new_exp_layer_.append(new_conv1)
+                new_layer1 = copy.deepcopy(self.convnet.layer1)
+                new_exp_layer_.append(new_layer1)
+                new_layer2 = copy.deepcopy(self.convnet.layer2)
+                new_exp_layer_.append(new_layer2)
+                new_layer3 = copy.deepcopy(self.convnet.layer3)
+                new_exp_layer_.append(new_layer3)
+                new_final_layer = nn.Sequential(*new_exp_layer_)
+            elif self.init_type == 3:
+                # Case3 init with last task param
+                new_exp_layer_ = []
+                if self.ntask == 2:
+                    new_conv1 = copy.deepcopy(self.convnet.conv1)
+                    new_exp_layer_.append(new_conv1)
+                    new_layer1 = copy.deepcopy(self.convnet.layer1)
+                    new_exp_layer_.append(new_layer1)
+                    new_layer2 = copy.deepcopy(self.convnet.layer2)
+                    new_exp_layer_.append(new_layer2)
+                    new_layer3 = copy.deepcopy(self.convnet.layer3)
+                    new_exp_layer_.append(new_layer3)
+                else:
+                    new_conv = copy.deepcopy(self.exp_layer[-1])
+                    new_exp_layer_.append(new_conv)
+                new_final_layer = nn.Sequential(*new_exp_layer_)
+            else:
+                raise Exception('init type error')
 
             self.exp_layer.append(new_final_layer)
 
@@ -2474,19 +2515,23 @@ class BasicNet_exp5(nn.Module):
         self.der = cfg['der']
         self.aux_nplus1 = cfg['aux_n+1']
         self.reuse_oldfc = cfg['reuse_oldfc']
+        self.init_type = cfg['init_type']
 
         if self.der:
             print("Enable dynamical reprensetation expansion!")
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
-                                               remove_last_relu=self.remove_last_relu)
+                                               start_class=self.start_class,
+                                               remove_last_relu=self.remove_last_relu,
+                                               init_type=self.init_type)
             self.exp_layer = nn.ModuleList()
             self.out_dim = self.convnet.out_dim
         else:
             self.convnet = factory.get_convnet(convnet_type,
                                                nf=nf,
                                                dataset=dataset,
+                                               start_class=self.start_class,
                                                remove_last_relu=self.remove_last_relu)
             self.out_dim = self.convnet.out_dim
         self.classifier = None
@@ -2586,29 +2631,56 @@ class BasicNet_exp5(nn.Module):
 
     def _add_classes_multi_fc(self, n_classes):
         if self.ntask > 1:
-            new_exp_layer_ = []
-            new_conv1 = copy.deepcopy(self.convnet.conv1)
-            new_exp_layer_.append(new_conv1)
-            new_layer1 = copy.deepcopy(self.convnet.layer1)
-            new_exp_layer_.append(new_layer1)
-            new_layer2 = copy.deepcopy(self.convnet.layer2)
-            new_exp_layer_.append(new_layer2)
-            # new_layer3 = copy.deepcopy(self.convnet.layer3)
-            # new_exp_layer_.append(new_layer3)
+            if self.init_type ==1:
+                # case1 random init
+                new_exp_layer_ = []
+                new_conv1 = copy.deepcopy(self.convnet.conv1)
+                new_exp_layer_.append(new_conv1)
+                new_layer1 = copy.deepcopy(self.convnet.layer1)
+                new_exp_layer_.append(new_layer1)
+                new_layer2 = copy.deepcopy(self.convnet.layer2)
+                new_exp_layer_.append(new_layer2)
+                new_final_layer = nn.Sequential(*new_exp_layer_)
 
-            new_final_layer = nn.Sequential(*new_exp_layer_)
+                m_num = 0
+                for m in new_final_layer.modules():
+                    if isinstance(m, nn.Conv2d):
+                        m_num += 1
+                        torch.nn.init.xavier_normal_(m.weight.data)
+                        if m.bias is not None:
+                            torch.nn.init.constant_(m.bias.data, 0.0)
+                    if isinstance(m, nn.BatchNorm2d):
+                        m_num += 1
+                        m.weight.data.fill_(1.0)
+                        m.bias.data.fill_(0.0)
+            elif self.init_type == 2:
+                # Case2 init with task0 param
+                new_exp_layer_ = []
+                new_conv1 = copy.deepcopy(self.convnet.conv1)
+                new_exp_layer_.append(new_conv1)
+                new_layer1 = copy.deepcopy(self.convnet.layer1)
+                new_exp_layer_.append(new_layer1)
+                new_layer2 = copy.deepcopy(self.convnet.layer2)
+                new_exp_layer_.append(new_layer2)
+                new_final_layer = nn.Sequential(*new_exp_layer_)
 
-            m_num = 0
-            for m in new_final_layer.modules():
-                if isinstance(m, nn.Conv2d):
-                    m_num += 1
-                    torch.nn.init.xavier_normal_(m.weight.data)
-                    if m.bias is not None:
-                        torch.nn.init.constant_(m.bias.data, 0.0)
-                if isinstance(m, nn.BatchNorm2d):
-                    m_num += 1
-                    m.weight.data.fill_(1.0)
-                    m.bias.data.fill_(0.0)
+            elif self.init_type == 3:
+                # Case3 init with last task param
+                new_exp_layer_ = []
+                if self.ntask == 2:
+                    new_conv1 = copy.deepcopy(self.convnet.conv1)
+                    new_exp_layer_.append(new_conv1)
+                    new_layer1 = copy.deepcopy(self.convnet.layer1)
+                    new_exp_layer_.append(new_layer1)
+                    new_layer2 = copy.deepcopy(self.convnet.layer2)
+                    new_exp_layer_.append(new_layer2)
+                else:
+                    new_conv = copy.deepcopy(self.exp_layer[-1])
+                    new_exp_layer_.append(new_conv)
+                new_final_layer = nn.Sequential(*new_exp_layer_)
+            else:
+                raise Exception('init type error')
+
 
             self.exp_layer.append(new_final_layer)
 

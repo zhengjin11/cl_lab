@@ -77,6 +77,7 @@ class ExpNet4(IncrementalLearner):
             dataset=cfg["dataset"],
         )
         self._parallel_network = DataParallel(self._network)
+
         self._train_head = cfg["train_head"]
         self._infer_head = cfg["infer_head"]
         self._old_model = None
@@ -313,11 +314,11 @@ class ExpNet4(IncrementalLearner):
 
     def _after_task(self, taski, inc_dataset):
         network = deepcopy(self._parallel_network)
-        network.eval()
-        self._ex.logger.info("save model")
-        if self._cfg["save_ckpt"] and taski >= self._cfg["start_task"]:
-            save_path = os.path.join(os.getcwd(), "ckpts")
-            torch.save(network.cpu().state_dict(), "{}/step{}.ckpt".format(save_path, self._task))
+        # network.eval()
+        # self._ex.logger.info("save model")
+        # if self._cfg["save_ckpt"] and taski >= self._cfg["start_task"]:
+        #     save_path = os.path.join(os.getcwd(), "ckpts")
+        #     torch.save(network.cpu().state_dict(), "{}/step{}.ckpt".format(save_path, self._task))
 
         if (self._cfg["decouple"]['enable'] and taski > 0):
             if self._cfg["decouple"]["fullset"]:
@@ -385,6 +386,12 @@ class ExpNet4(IncrementalLearner):
                 if not (os.path.exists(f"{save_path}/mem_step{self._task}.ckpt") and self._cfg['load_mem']):
                     torch.save(memory, "{}/mem_step{}.ckpt".format(save_path, self._task))
                     self._ex.logger.info(f"Save step{self._task} memory!")
+
+        network.eval()
+        self._ex.logger.info("save model")
+        if self._cfg["save_ckpt"] and taski >= self._cfg["start_task"]:
+            save_path = os.path.join(os.getcwd(), "ckpts")
+            torch.save(network.cpu().state_dict(), "{}/step{}.ckpt".format(save_path, self._task))
 
         self._parallel_network.eval()
         self._old_model = deepcopy(self._parallel_network)
